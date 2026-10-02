@@ -88,6 +88,20 @@ export function open(el, urls, opts) {
         camera.lookAt(0, 0, 1);
         camera.updateProjectionMatrix();
     }
+    // Витрина (для окна магазина): камера вьюмодели, сдвинутая и повёрнутая так, чтобы руки с ножом смотрелись лучше.
+    // SHOW = [FOV, вправо, вниз, вперёд, поворот вправо (град), наклон вниз (град)]; opts.show / setShow()
+    // своя камера у каждого ножа - cameras.json (выставлены в tuner.html); это - запасная, если ножа там нет
+    let SHOW = opts.show || [65, -3, 0, 0, 5, 3];
+    function showView() {
+        controls.enabled = false;
+        const [fov, right, down, fwd, yawD, pitchD] = SHOW.concat([0, 0, 0, 0, 0, 0]).slice(0, 6);
+        const yaw = yawD * Math.PI / 180, pitch = pitchD * Math.PI / 180;
+        camera.fov = fov;
+        camera.position.set(-right, -down, fwd);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(-right - Math.sin(yaw) * Math.cos(pitch), -down - Math.sin(pitch), fwd + Math.cos(yaw) * Math.cos(pitch));
+        camera.updateProjectionMatrix();
+    }
     // Свободная камера: крутим вокруг рук и ножа
     function orbitView() {
         root.updateMatrixWorld(true);
@@ -118,7 +132,7 @@ export function open(el, urls, opts) {
     const got = { k: 0, a: 0 }, tot = { k: 0, a: 0 };
     const prog = (key) => (p) => {
         got[key] = p.loaded; tot[key] = p.total || 0;
-        if (opts.onProgress && tot.k) opts.onProgress((got.k + got.a) / (tot.k + (tot.a || 400000)));
+        if (opts.onProgress && tot.k) opts.onProgress(Math.min(1, (got.k + got.a) / (tot.k + (urls.arms ? tot.a || 400000 : 0))));
     };
 
     Promise.all([load(urls.knife, prog('k')), urls.arms ? load(urls.arms, prog('a')) : null]).then(([g, a]) => {
@@ -133,7 +147,7 @@ export function open(el, urls, opts) {
         mixer.addEventListener('finished', (e) => {
             if (e.action === cur && cur !== actions.idle) { play('idle', true); if (onEnd) onEnd(e.action.getClip().name); }
         });
-        fpView();
+        (opts.view === 'fp' ? fpView : showView)();
         play(actions.draw ? 'draw' : 'idle', !actions.draw);
         if (opts.onLoad) opts.onLoad(Object.keys(actions));
     }).catch((err) => { if (opts.onError) opts.onError(err); });
@@ -158,9 +172,10 @@ export function open(el, urls, opts) {
     return {
         play: (n) => play(n, false),
         has: (n) => !!actions[n],
+        setShow: (v) => { SHOW = v; if (root && !controls.enabled) showView(); },
         // габариты модели в текущей позе (для проверки сборки): [ширина, высота, глубина]
         bounds: () => { if (!root) return null; root.updateMatrixWorld(true); const v = new THREE.Box3().setFromObject(root, true).getSize(new THREE.Vector3()); return [v.x, v.y, v.z].map((x) => Math.round(x)); },
-        view: (m) => { if (root) (m === 'orbit' ? orbitView : fpView)(); },
+        view: (m) => { if (root) (m === 'orbit' ? orbitView : m === 'fp' ? fpView : showView)(); },
         onEnd: (f) => { onEnd = f; },
         // кадр анимации на момент t (превью/скриншоты): останавливает микшер на этой позе
         pose: (n, t) => {
